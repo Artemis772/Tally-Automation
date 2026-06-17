@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "tally": {
+      "command": "python",
+      "args": ["-m", "tally_mcp"],
+      "cwd": "C:\\path\\to\\Tally-Automation",
+      "env": {
+        "PYTHONPATH": "C:\\path\\to\\Tally-Automation\\src",
+        "TALLY_HOST": "localhost",
+        "TALLY_PORT": "9000",
+        "TALLY_COMPANY": "",
+        "TALLY_TIMEOUT": "30",
+        "TALLY_ALLOW_WRITES": "false"
+      }
+    }
+  }
+}
