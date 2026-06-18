@@ -34,17 +34,29 @@ All tools accept an optional `company` argument; when omitted they use
 
 ## Write tools (Phase 2 — disabled by default)
 
-These require `TALLY_ALLOW_WRITES=true` **and** `dry_run=false, confirm=true` to
-actually post. By default they return an `xml_preview` without sending anything.
-See [SETUP.md](SETUP.md#enabling-writes-phase-2).
+Writes require `TALLY_ALLOW_WRITES=true` and can be locked to one company with
+`TALLY_WRITE_COMPANY`. Vouchers use a **prepare → confirm → post → verify** flow.
+This iteration supports **accounting vouchers only**: Payment, Receipt, Contra,
+Journal. See [VERIFYING_WRITES.md](VERIFYING_WRITES.md).
 
 | Tool | Arguments | Notes |
 |------|-----------|-------|
-| `create_ledger` | `name`, `parent_group`, `opening_balance?`, `company?`, `dry_run=true`, `confirm=false` | Creates a ledger master |
-| `create_voucher` | `voucher_type`, `voucher_date`, `entries`, `narration?`, `party_ledger?`, `company?`, `dry_run=true`, `confirm=false` | Creates an accounting voucher; entries must net to zero |
+| `prepare_voucher` | `voucher_type`, `voucher_date`, `entries`, `narration?`, `company?` | Validates and stages a voucher; returns a `draft_id` + preview table. **No write.** |
+| `post_voucher` | `draft_id`, `confirm=false` | Shows the entries in a confirmation dialog (elicitation) and posts on approval. Returns Tally's counters (`created`, `errors`, `last_vch_id`). Pass `confirm=true` if your client has no dialog support. |
+| `verify_voucher` | `from_date`, `to_date`, `voucher_type?`, `ledger?`, `amount?`, `company?` | Re-reads Tally's day book to independently confirm a voucher exists. Read-only. |
+| `create_ledger` | `name`, `parent_group`, `opening_balance?`, `company?`, `confirm=false` | Creates a ledger master; dry run unless `confirm=true`. |
 
 `entries` is a list of `{"ledger": str, "amount": float}` where a **positive
-amount is a debit** and a **negative amount is a credit**.
+amount is a debit** and a **negative amount is a credit**. Debits and credits
+must net to zero.
+
+### Typical write conversation
+
+1. *"Prepare a Journal: debit Office Rent 20000, credit Cash 20000, dated today."*
+   → `prepare_voucher` returns a preview table + `draft_id`.
+2. *"Post it."* → `post_voucher` shows a **confirmation dialog** with the entries;
+   approve it. → `created=1, voucher_id=N`.
+3. *"Verify it."* → `verify_voucher` finds it in the day book.
 
 ## Example prompts
 
@@ -55,5 +67,7 @@ amount is a debit** and a **negative amount is a credit**.
 - "What are my outstanding receivables right now?"
 - "Show the day book for 2026-04-01 to 2026-04-30."
 - "Show ABC Traders' statement for last month."
-- "Draft a payment voucher of 20000 from Cash to Office Rent dated today
-  (dry run first), then post it once I confirm."
+- "Prepare a Journal: debit Office Rent 20000, credit Cash 20000, dated today —
+  let me review it, then I'll tell you to post."
+- "Post that draft." (approve the confirmation dialog)
+- "Verify the voucher we just posted."

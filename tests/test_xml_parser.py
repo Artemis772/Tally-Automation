@@ -72,3 +72,19 @@ def test_element_to_dict_collapses_repeated_tags():
     d = xp.element_to_dict(root)
     assert d["L"] == ["A", "B"]
     assert d["X"] == "1"
+
+
+def test_parse_import_response_success():
+    res = xp.parse_import_response(load_fixture("import_success.xml"))
+    assert res["ok"] is True
+    assert res["created"] == 1
+    assert res["errors"] == 0
+    assert res["last_vch_id"] == 4521
+    assert res["lineerror"] == ""
+
+
+def test_parse_import_response_error_does_not_raise():
+    res = xp.parse_import_response(load_fixture("import_error.xml"))
+    assert res["ok"] is False
+    assert res["errors"] == 1
+    assert "Office Rent" in res["lineerror"]

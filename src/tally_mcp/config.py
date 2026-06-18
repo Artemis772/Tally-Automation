@@ -37,6 +37,7 @@ class TallyConfig:
     company: str = ""          # default company; "" means Tally's active company
     timeout: int = 30          # seconds
     allow_writes: bool = False
+    write_company: str = ""    # when set, writes are locked to this company only
 
     @property
     def base_url(self) -> str:
@@ -50,6 +51,7 @@ class TallyConfig:
             company=os.getenv("TALLY_COMPANY", "").strip(),
             timeout=_get_int("TALLY_TIMEOUT", 30),
             allow_writes=_get_bool("TALLY_ALLOW_WRITES", False),
+            write_company=os.getenv("TALLY_WRITE_COMPANY", "").strip(),
         )
 
 

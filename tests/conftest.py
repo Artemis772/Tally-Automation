@@ -30,8 +30,10 @@ class FakeTallyClient:
         "<TYPE>Bills</TYPE>": "bills.xml",
     }
 
-    def __init__(self) -> None:
+    def __init__(self, post_fixture: str = "import_success.xml") -> None:
         self.last_request: str | None = None
+        self.last_post: str | None = None
+        self.post_fixture = post_fixture
 
     def request(self, xml_body: str) -> ET.Element:
         self.last_request = xml_body
@@ -39,6 +41,11 @@ class FakeTallyClient:
             if marker in xml_body:
                 return parse(load_fixture(fixture))
         raise AssertionError(f"No fixture route matched request:\n{xml_body}")
+
+    def post(self, xml_body: str) -> str:
+        """Used by write paths; returns the configured import-response fixture."""
+        self.last_post = xml_body
+        return load_fixture(self.post_fixture).decode("utf-8")
 
     def ping(self) -> bool:
         return True

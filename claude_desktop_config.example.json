@@ -10,7 +10,8 @@
         "TALLY_PORT": "9000",
         "TALLY_COMPANY": "",
         "TALLY_TIMEOUT": "30",
-        "TALLY_ALLOW_WRITES": "false"
+        "TALLY_ALLOW_WRITES": "false",
+        "TALLY_WRITE_COMPANY": ""
       }
     }
   }
