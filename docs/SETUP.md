@@ -118,29 +118,33 @@ Ask Claude:
 
 ## Enabling writes (Phase 2)
 
-Write tools (`create_ledger`, `create_voucher`) are **disabled by default** and
-double-guarded.
+Write tools are **disabled by default**. This iteration supports **accounting
+vouchers only** (Payment, Receipt, Contra, Journal) plus `create_ledger`.
 
 **Before enabling, back up your company** in Tally (Gateway of Tally → select
 company → **Backup**).
 
 To enable:
 
-1. Set `TALLY_ALLOW_WRITES=true` in `.env` (or in the Claude Desktop config
-   `env` block) and restart the server/Claude.
-2. Even then, every write call defaults to a **dry run** that returns the XML it
-   *would* send. To actually post, the tool must be called with
-   `dry_run=false` and `confirm=true`.
+1. Set `TALLY_ALLOW_WRITES=true` in `.env` (or the Claude Desktop / Claude Code
+   config `env` block) and restart.
+2. **Strongly recommended while testing:** set `TALLY_WRITE_COMPANY` to a
+   throwaway test company name. Writes will then refuse any other company, so
+   you cannot touch real books by accident.
 
-A good workflow with Claude:
+The voucher flow is **prepare → confirm → post → verify**:
 
-1. Ask Claude to draft the voucher — it returns the XML preview (dry run).
-2. Review the preview.
-3. Tell Claude to "post it for real (confirm)" — it re-calls with
-   `dry_run=false, confirm=true`.
+1. *"Prepare a Journal: debit Office Rent 20000, credit Cash 20000, today."* →
+   `prepare_voucher` returns a preview table + `draft_id`. Nothing is written.
+2. *"Post it."* → `post_voucher` shows a **confirmation dialog** with the entries
+   (this uses MCP *elicitation*, supported by Claude Code). Approve to post; you
+   get back `created=1, voucher_id=N`. (If your client has no dialog support,
+   say "post with confirm=true".)
+3. *"Verify it."* → `verify_voucher` re-reads Tally's day book and confirms it.
 
-Vouchers must balance: debits and credits (positive/negative amounts) net to
-zero, or the tool refuses before sending.
+Vouchers must balance (debits/credits net to zero) or the tool refuses before
+sending. For the full verification playbook see
+[VERIFYING_WRITES.md](VERIFYING_WRITES.md).
 
 ## Troubleshooting
 

@@ -29,9 +29,13 @@ Claude Desktop / Claude Code
 - **Phase 1 — read-only (implemented):** companies, groups, ledgers & balances,
   trial balance, P&L, balance sheet, day book, ledger statement, outstanding
   bills, stock items.
-- **Phase 2 — writes (implemented but disabled by default):** create ledgers and
-  vouchers. Guarded by `TALLY_ALLOW_WRITES` **and** a per-call dry-run. See
-  [docs/SETUP.md](docs/SETUP.md#enabling-writes-phase-2).
+- **Phase 2 — writes (implemented, disabled by default):** accounting vouchers
+  (Payment, Receipt, Contra, Journal) and ledgers, via a **prepare → confirm →
+  post → verify** flow. `post_voucher` shows the exact entries in a
+  **confirmation dialog** (MCP elicitation, supported by Claude Code) before
+  anything is written. Guarded by `TALLY_ALLOW_WRITES` and an optional
+  `TALLY_WRITE_COMPANY` lock. See
+  [docs/VERIFYING_WRITES.md](docs/VERIFYING_WRITES.md).
 
 ## Quick start
 
@@ -68,5 +72,7 @@ pytest
 ## Safety
 
 Writes are **off by default**. Before enabling them, **back up your company in
-Tally** (Gateway of Tally → company → Backup). Every write tool defaults to a
-dry run that returns the exact XML it *would* send so you can review it first.
+Tally** (Gateway of Tally → company → Backup). Vouchers are previewed and then
+confirmed in a dialog before posting, and writes can be **locked to a single
+test company** via `TALLY_WRITE_COMPANY`. See
+[docs/VERIFYING_WRITES.md](docs/VERIFYING_WRITES.md).

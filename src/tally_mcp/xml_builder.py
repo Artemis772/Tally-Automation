@@ -183,6 +183,9 @@ def build_company_collection() -> str:
 # Phase 2: write envelopes (Import). Defined now; gated by config at call site.
 # ---------------------------------------------------------------------------
 
+# Accounting (non-inventory) voucher types supported this iteration.
+ACCOUNTING_VOUCHER_TYPES = ("Payment", "Receipt", "Contra", "Journal")
+
 def build_ledger_master(
     name: str,
     *,

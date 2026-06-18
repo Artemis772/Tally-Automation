@@ -116,6 +116,43 @@ def _raise_on_error(root: ET.Element, text: str) -> None:
         raise TallyResponseError(f"Tally import reported errors: {detail}")
 
 
+def _int_text(root: ET.Element, tag: str, default: int = 0) -> int:
+    el = root.find(f".//{tag}")
+    if el is None:
+        return default
+    try:
+        return int((el.text or "").strip() or default)
+    except ValueError:
+        return default
+
+
+def parse_import_response(raw: bytes | str | ET.Element) -> dict[str, Any]:
+    """Parse Tally's import (write) acknowledgement into counters.
+
+    Tally answers an Import request with a ``<RESPONSE>`` block carrying counters
+    such as ``CREATED``, ``ALTERED``, ``DELETED``, ``ERRORS``, ``EXCEPTIONS`` and
+    ``LASTVCHID`` (the id of the newly created voucher). Errors arrive with HTTP
+    200, so these counters — not the HTTP status — are the source of truth.
+
+    Unlike :func:`parse`, this does not raise on errors; it returns them in the
+    dict so callers can present a structured result.
+    """
+    root = raw if isinstance(raw, ET.Element) else ET.fromstring(sanitize(raw))
+    line_error_el = root.find(".//LINEERROR")
+    line_error = (line_error_el.text or "").strip() if line_error_el is not None else ""
+    result = {
+        "created": _int_text(root, "CREATED"),
+        "altered": _int_text(root, "ALTERED"),
+        "deleted": _int_text(root, "DELETED"),
+        "errors": _int_text(root, "ERRORS"),
+        "exceptions": _int_text(root, "EXCEPTIONS"),
+        "last_vch_id": _int_text(root, "LASTVCHID"),
+        "lineerror": line_error,
+    }
+    result["ok"] = result["errors"] == 0 and not line_error
+    return result
+
+
 def _clean_text(value: str | None) -> str:
     if value is None:
         return ""

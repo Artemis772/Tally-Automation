@@ -1,9 +1,16 @@
 """Tally MCP server: exposes TallyPrime data to Claude as MCP tools.
 
-Phase 1 tools are read-only. Phase 2 write tools (create_ledger / create_voucher)
-are registered but guarded twice: the global ``TALLY_ALLOW_WRITES`` flag must be
-enabled, and each call defaults to ``dry_run=True`` (returns the XML it *would*
-send without posting it).
+Phase 1 tools are read-only.
+
+Phase 2 write tools use a **prepare -> confirm -> post -> verify** flow:
+- ``prepare_voucher`` validates and stages a voucher, returning a preview.
+- ``post_voucher`` shows the entries in a confirmation dialog (MCP *elicitation*,
+  supported by Claude Code) and only posts on approval. If the client doesn't
+  support elicitation, pass ``confirm=true`` explicitly.
+- ``verify_voucher`` independently re-reads Tally to confirm the result.
+
+Writes are guarded by ``TALLY_ALLOW_WRITES`` and, optionally, locked to a single
+``TALLY_WRITE_COMPANY`` (e.g. a test company).
 
 Run with stdio transport (the default for Claude Desktop / Claude Code):
 
@@ -16,13 +23,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
+from pydantic import BaseModel, Field
 
-from . import reports
+from . import reports, writes
 from .client import TallyClient, TallyConnectionError
 from .config import config
-from .xml_builder import build_ledger_master, build_voucher_import
+from .drafts import drafts
+from .xml_builder import build_ledger_master
 from .xml_parser import TallyResponseError
+from .writes import WriteError
 
 mcp = FastMCP("tally")
 client = TallyClient()
@@ -154,28 +164,115 @@ def list_stock_items(company: str | None = None) -> list[dict[str, Any]] | dict[
 
 
 # ---------------------------------------------------------------------------
-# Phase 2 — write tools (guarded). Enabled only when TALLY_ALLOW_WRITES=true.
-# Each defaults to dry_run=True so Claude/users can review the XML first.
+# Phase 2 — write tools. Flow: prepare -> (elicit) confirm -> post -> verify.
+# Enabled only when TALLY_ALLOW_WRITES=true; optionally locked to one company.
 # ---------------------------------------------------------------------------
 
-def _write_guard(xml_body: str, dry_run: bool, confirm: bool) -> dict[str, Any] | None:
-    """Return a short-circuit response if the write should not be posted yet."""
-    if not config.allow_writes:
-        return {
-            "posted": False,
-            "reason": (
-                "Writes are disabled. Set TALLY_ALLOW_WRITES=true in your .env "
-                "(and back up your company) to enable creating data in Tally."
-            ),
-            "xml_preview": xml_body,
-        }
-    if dry_run or not confirm:
-        return {
-            "posted": False,
-            "reason": "Dry run: review the XML, then call again with dry_run=false and confirm=true.",
-            "xml_preview": xml_body,
-        }
-    return None
+class _ConfirmPost(BaseModel):
+    """Schema for the post confirmation dialog (MCP elicitation)."""
+
+    confirm: bool = Field(
+        default=False,
+        description="Post this voucher to Tally now? Review the entries above first.",
+    )
+
+
+@mcp.tool()
+def prepare_voucher(
+    voucher_type: str,
+    voucher_date: str,
+    entries: list[dict[str, Any]],
+    narration: str = "",
+    company: str | None = None,
+) -> dict[str, Any]:
+    """Stage an accounting voucher and return a preview to review (no write).
+
+    Args:
+        voucher_type: Payment, Receipt, Contra, or Journal.
+        voucher_date: YYYY-MM-DD.
+        entries: list of {"ledger": str, "amount": float}; positive = debit,
+            negative = credit. Must net to zero.
+        narration: optional note.
+        company: optional; ignored/validated against TALLY_WRITE_COMPANY if set.
+
+    Returns a ``draft_id`` and a ``preview`` (with a ready-to-read ``text`` table).
+    Call ``post_voucher(draft_id)`` to actually post it after review.
+    """
+    try:
+        return writes.prepare_voucher(
+            voucher_type, voucher_date, entries, narration=narration, company=company
+        )
+    except WriteError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool()
+async def post_voucher(
+    draft_id: str,
+    confirm: bool = False,
+    ctx: Context = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    """Post a previously prepared voucher to Tally.
+
+    Shows the staged entries in a confirmation dialog (elicitation) and posts only
+    on approval. If the client does not support elicitation, pass ``confirm=true``.
+    """
+    draft = drafts.get(draft_id)
+    if draft is None:
+        return {"posted": False, "error": f"Unknown or expired draft_id {draft_id!r}. Call prepare_voucher again."}
+
+    preview = writes.build_preview(
+        draft["voucher_type"], draft["voucher_date"], draft["entries"],
+        draft.get("narration", ""), draft.get("company"),
+    )
+
+    # Confirmation gate: explicit confirm flag, else an elicitation dialog.
+    if not confirm:
+        approved = False
+        if ctx is not None:
+            try:
+                result = await ctx.elicit(
+                    message="Confirm posting this voucher to Tally:\n\n" + preview["text"],
+                    schema=_ConfirmPost,
+                )
+                approved = result.action == "accept" and bool(result.data and result.data.confirm)
+            except Exception:
+                approved = False  # client lacks elicitation support
+        if not approved:
+            return {
+                "posted": False,
+                "reason": "Not confirmed. Review the preview, then approve the dialog or call post_voucher(draft_id, confirm=true).",
+                "preview": preview,
+            }
+
+    drafts.pop(draft_id)  # consume the draft
+    try:
+        return writes.post_draft(client, draft)
+    except (TallyConnectionError, TallyResponseError, WriteError) as exc:
+        return {"posted": False, "error": str(exc), "preview": preview}
+
+
+@mcp.tool()
+def verify_voucher(
+    from_date: str,
+    to_date: str,
+    voucher_type: str | None = None,
+    ledger: str | None = None,
+    amount: float | None = None,
+    company: str | None = None,
+) -> dict[str, Any]:
+    """Independently confirm a voucher exists by re-reading Tally's day book.
+
+    Filters the day book in the date range by voucher type, party ledger, and/or
+    absolute amount. Read-only — proof from Tally's own data.
+    """
+    try:
+        return writes.verify_voucher(
+            client, from_date, to_date,
+            voucher_type=voucher_type, ledger=ledger, amount=amount, company=company,
+        )
+    except (TallyConnectionError, TallyResponseError) as exc:
+        return {"verified": False, "error": str(exc)}
 
 
 @mcp.tool()
@@ -184,74 +281,38 @@ def create_ledger(
     parent_group: str,
     opening_balance: float | None = None,
     company: str | None = None,
-    dry_run: bool = True,
     confirm: bool = False,
 ) -> dict[str, Any]:
     """Create a ledger master under ``parent_group``.
 
-    Guarded: requires TALLY_ALLOW_WRITES=true, plus dry_run=false and confirm=true
-    to actually post. Defaults to a dry run that returns the XML preview.
+    Guarded by TALLY_ALLOW_WRITES and the optional TALLY_WRITE_COMPANY lock.
+    Defaults to a dry run (returns the XML preview); pass ``confirm=true`` to post.
     """
-    xml_body = build_ledger_master(
-        name,
-        parent_group=parent_group,
-        opening_balance=opening_balance,
-        company=reports._company(company),
-    )
-    guarded = _write_guard(xml_body, dry_run, confirm)
-    if guarded is not None:
-        return guarded
     try:
-        client.request(xml_body)
-    except (TallyConnectionError, TallyResponseError) as exc:
-        return {"posted": False, "error": str(exc), "xml_preview": xml_body}
-    return {"posted": True, "ledger": name, "parent_group": parent_group}
+        writes.ensure_writes_enabled()
+        target = writes.resolve_write_company(company)
+    except WriteError as exc:
+        xml_body = build_ledger_master(name, parent_group=parent_group,
+                                       opening_balance=opening_balance)
+        return {"posted": False, "reason": str(exc), "xml_preview": xml_body}
 
-
-@mcp.tool()
-def create_voucher(
-    voucher_type: str,
-    voucher_date: str,
-    entries: list[dict[str, Any]],
-    narration: str = "",
-    party_ledger: str | None = None,
-    company: str | None = None,
-    dry_run: bool = True,
-    confirm: bool = False,
-) -> dict[str, Any]:
-    """Create an accounting voucher.
-
-    Args:
-        voucher_type: Payment, Receipt, Contra, Journal, Sales, Purchase, ...
-        voucher_date: YYYY-MM-DD.
-        entries: list of {"ledger": str, "amount": float}; positive = debit,
-            negative = credit. Debits and credits must net to zero.
-        narration / party_ledger: optional.
-
-    Guarded: requires TALLY_ALLOW_WRITES=true, plus dry_run=false and confirm=true.
-    """
-    total = sum(float(e["amount"]) for e in entries)
-    if round(total, 2) != 0:
+    xml_body = build_ledger_master(
+        name, parent_group=parent_group, opening_balance=opening_balance, company=target,
+    )
+    if not confirm:
         return {
             "posted": False,
-            "error": f"Voucher does not balance: debits/credits net to {total:.2f}, must be 0.",
+            "reason": "Dry run: review the XML, then call again with confirm=true.",
+            "xml_preview": xml_body,
         }
-    xml_body = build_voucher_import(
-        voucher_type=voucher_type,
-        voucher_date=voucher_date,
-        entries=entries,
-        narration=narration,
-        party_ledger=party_ledger,
-        company=reports._company(company),
-    )
-    guarded = _write_guard(xml_body, dry_run, confirm)
-    if guarded is not None:
-        return guarded
     try:
-        client.request(xml_body)
+        from .xml_parser import parse_import_response
+        result = parse_import_response(client.post(xml_body))
     except (TallyConnectionError, TallyResponseError) as exc:
         return {"posted": False, "error": str(exc), "xml_preview": xml_body}
-    return {"posted": True, "voucher_type": voucher_type, "date": voucher_date}
+    result["posted"] = bool(result.get("ok"))
+    result["ledger"] = name
+    return result
 
 
 def main() -> None:
