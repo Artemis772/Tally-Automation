@@ -315,7 +315,7 @@ def create_ledger(
     return result
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover
     """Console-script / module entry point. Runs the MCP server over stdio."""
     mcp.run()
 

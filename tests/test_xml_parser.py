@@ -88,3 +88,32 @@ def test_parse_import_response_error_does_not_raise():
     assert res["ok"] is False
     assert res["errors"] == 1
     assert "Office Rent" in res["lineerror"]
+
+
+def test_decode_latin1_fallback():
+    # 0xE9 is 'é' in latin-1 but invalid as a lone UTF-8 byte.
+    assert xp.decode(b"caf\xe9") == "caf\xe9"
+
+
+def test_decode_passes_through_str():
+    assert xp.decode("already text") == "already text"
+
+
+def test_sanitize_is_idempotent():
+    once = xp.sanitize("<A>Tom & Jerry\x04</A>")
+    twice = xp.sanitize(once)
+    assert once == twice
+    assert "\x04" not in once
+
+
+def test_sanitize_preserves_valid_high_charref():
+    # A valid char reference (e.g. an emoji) must survive.
+    assert "&#128512;" in xp.sanitize("<A>&#128512;</A>")
+
+
+def test_parse_import_response_accepts_element():
+    from xml.etree import ElementTree as ET
+
+    root = ET.fromstring("<R><CREATED>2</CREATED><ERRORS>0</ERRORS></R>")
+    res = xp.parse_import_response(root)
+    assert res["created"] == 2 and res["ok"] is True

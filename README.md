@@ -61,13 +61,25 @@ prompts.
 
 ## Tests
 
-Offline unit tests (no Tally required) cover XML building, the defensive
-response parser, and the report logic against captured fixtures:
+A comprehensive suite runs with **no live Tally** — a mock HTTP gateway
+(`tests/mock_tally.py`) stands in, so even the real HTTP client, the async
+confirmation (elicitation) flow, and every report are exercised. Coverage is
+gated at 95% (currently ~99%).
 
 ```bash
 pip install -e ".[dev]"
-pytest
+pytest                  # full suite + coverage gate
 ```
+
+A live harness for the actual Tally machine:
+
+```bash
+python scripts/e2e_test.py                          # every read tool, PASS/FAIL table
+python scripts/e2e_test.py --write --company "ZZ Test Co"  # full write loop (test co)
+```
+
+See [docs/TEST_PLAN.md](docs/TEST_PLAN.md) for the full coverage matrix and the
+manual Tally-UI checklist.
 
 ## Safety
 

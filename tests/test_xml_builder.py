@@ -94,3 +94,44 @@ def test_ledger_master_create_action():
     ledger = root.find(".//LEDGER")
     assert ledger.get("ACTION") == "Create"
     assert ledger.findtext("PARENT") == "Sundry Debtors"
+
+
+def test_to_tally_date_accepts_date_objects():
+    from datetime import date, datetime
+
+    assert xb.to_tally_date(date(2026, 4, 1)) == "20260401"
+    assert xb.to_tally_date(datetime(2026, 4, 1, 13, 0)) == "20260401"
+
+
+def test_esc_handles_none_and_specials():
+    assert xb.esc(None) == ""
+    assert xb.esc("a & b < c > d") == "a &amp; b &lt; c &gt; d"
+
+
+def test_report_export_extra_static():
+    xml = xb.build_report_export("Day Book", extra_static={"SVLEDGER": "Cash"})
+    root = _well_formed(xml)
+    assert root.findtext(".//SVLEDGER") == "Cash"
+
+
+def test_company_collection_requests_company_type():
+    root = _well_formed(xb.build_company_collection())
+    coll = root.find(".//COLLECTION")
+    assert coll.findtext("TYPE") == "Company"
+
+
+def test_ledger_master_with_opening_balance():
+    xml = xb.build_ledger_master("Cash", parent_group="Cash-in-Hand", opening_balance=5000)
+    root = _well_formed(xml)
+    assert root.findtext(".//OPENINGBALANCE") == "5000"
+
+
+def test_voucher_import_with_party_ledger():
+    xml = xb.build_voucher_import(
+        voucher_type="Sales",
+        voucher_date="2026-04-01",
+        entries=[{"ledger": "ABC", "amount": -15000}, {"ledger": "Sales", "amount": 15000}],
+        party_ledger="ABC Traders",
+    )
+    root = _well_formed(xml)
+    assert root.findtext(".//PARTYLEDGERNAME") == "ABC Traders"

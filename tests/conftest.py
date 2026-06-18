@@ -54,3 +54,25 @@ class FakeTallyClient:
 @pytest.fixture
 def fake_client() -> FakeTallyClient:
     return FakeTallyClient()
+
+
+@pytest.fixture
+def mock_tally():
+    """A running mock Tally gateway (real HTTP server on an ephemeral port)."""
+    from mock_tally import MockTally
+
+    server = MockTally().start()
+    try:
+        yield server
+    finally:
+        server.stop()
+
+
+@pytest.fixture
+def mock_client(mock_tally):
+    """A real TallyClient pointed at the mock gateway."""
+    from tally_mcp.client import TallyClient
+    from tally_mcp.config import TallyConfig
+
+    cfg = TallyConfig(host=mock_tally.host, port=mock_tally.port, timeout=5)
+    return TallyClient(cfg)

@@ -1,0 +1,23 @@
+<ENVELOPE>
+ <BODY>
+  <DATA>
+   <COLLECTION>
+    <GROUP NAME="Sundry Debtors">
+     <NAME>Sundry Debtors</NAME>
+     <PARENT>Current Assets</PARENT>
+     <ISREVENUE>No</ISREVENUE>
+    </GROUP>
+    <GROUP NAME="Sales Accounts">
+     <NAME>Sales Accounts</NAME>
+     <PARENT></PARENT>
+     <ISREVENUE>Yes</ISREVENUE>
+    </GROUP>
+    <GROUP NAME="Cash-in-Hand">
+     <NAME>Cash-in-Hand</NAME>
+     <PARENT>Current Assets</PARENT>
+     <ISREVENUE>No</ISREVENUE>
+    </GROUP>
+   </COLLECTION>
+  </DATA>
+ </BODY>
+</ENVELOPE>

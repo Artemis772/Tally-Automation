@@ -61,15 +61,24 @@ class TallyResponseError(RuntimeError):
 
 
 def decode(raw: bytes | str) -> str:
-    """Decode raw bytes from Tally, trying UTF-8 then falling back to latin-1."""
+    """Decode raw bytes from Tally.
+
+    Tally emits UTF-8 or a Windows/latin-1 code page (occasionally UTF-16 with a
+    BOM). UTF-16 is only attempted when a BOM is present, because it would
+    otherwise greedily mis-decode ordinary latin-1 bytes into garbage. latin-1 is
+    the final fallback and maps every byte 1:1, so it never fails.
+    """
     if isinstance(raw, str):
         return raw
-    for encoding in ("utf-8", "utf-16", "latin-1"):
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
         try:
-            return raw.decode(encoding)
+            return raw.decode("utf-16")
         except (UnicodeDecodeError, LookupError):
-            continue
-    return raw.decode("utf-8", errors="replace")
+            pass
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("latin-1")
 
 
 def sanitize(raw: bytes | str) -> str:
